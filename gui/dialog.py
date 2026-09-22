@@ -12,7 +12,8 @@ from qgis.PyQt.QtWidgets import (
     QGroupBox,
     QMessageBox,
     QLineEdit,
-    QFileDialog
+    QFileDialog,
+    QCheckBox
 )
 
 from qgis.PyQt.QtGui import QColor
@@ -40,23 +41,23 @@ class ChangeDetectorDialog(QDialog):
             "Детектор изменений растров"
         )
 
-        self.setMinimumWidth(520)
+        self.setMinimumWidth(560)
 
         self.create_ui()
 
         self.load_raster_layers()
 
-    # ---------------------------------------------------------
+    # =========================================================
     # СОЗДАНИЕ ИНТЕРФЕЙСА
-    # ---------------------------------------------------------
+    # =========================================================
 
     def create_ui(self):
 
         main_layout = QVBoxLayout()
 
-        # -----------------------------------------------------
-        # Исходные растры
-        # -----------------------------------------------------
+        # =====================================================
+        # ИСХОДНЫЕ РАСТРЫ
+        # =====================================================
 
         raster_group = QGroupBox(
             "Исходные растры"
@@ -85,9 +86,52 @@ class ChangeDetectorDialog(QDialog):
             raster_group
         )
 
-        # -----------------------------------------------------
-        # Параметры анализа
-        # -----------------------------------------------------
+        # =====================================================
+        # QA_PIXEL
+        # =====================================================
+
+        qa_group = QGroupBox(
+            "Маскирование облаков"
+        )
+
+        qa_layout = QFormLayout()
+
+        self.use_qa_checkbox = QCheckBox(
+            "Использовать QA_PIXEL"
+        )
+
+        self.use_qa_checkbox.setChecked(
+            True
+        )
+
+        qa_layout.addRow(
+            self.use_qa_checkbox
+        )
+
+        self.before_qa_combo = QComboBox()
+        self.after_qa_combo = QComboBox()
+
+        qa_layout.addRow(
+            "QA до:",
+            self.before_qa_combo
+        )
+
+        qa_layout.addRow(
+            "QA после:",
+            self.after_qa_combo
+        )
+
+        qa_group.setLayout(
+            qa_layout
+        )
+
+        main_layout.addWidget(
+            qa_group
+        )
+
+        # =====================================================
+        # ПАРАМЕТРЫ АНАЛИЗА
+        # =====================================================
 
         parameter_group = QGroupBox(
             "Параметры анализа"
@@ -95,7 +139,9 @@ class ChangeDetectorDialog(QDialog):
 
         parameter_layout = QFormLayout()
 
+        # -----------------------------------------------------
         # Канал
+        # -----------------------------------------------------
 
         self.band_combo = QComboBox()
 
@@ -104,7 +150,9 @@ class ChangeDetectorDialog(QDialog):
             self.band_combo
         )
 
+        # -----------------------------------------------------
         # Sigma
+        # -----------------------------------------------------
 
         self.sigma_spin = QDoubleSpinBox()
 
@@ -133,7 +181,9 @@ class ChangeDetectorDialog(QDialog):
             self.sigma_spin
         )
 
+        # -----------------------------------------------------
         # Минимальный размер области
+        # -----------------------------------------------------
 
         self.min_region_spin = QSpinBox()
 
@@ -166,9 +216,9 @@ class ChangeDetectorDialog(QDialog):
             parameter_group
         )
 
-        # -----------------------------------------------------
-        # Результат
-        # -----------------------------------------------------
+        # =====================================================
+        # РЕЗУЛЬТАТ
+        # =====================================================
 
         output_group = QGroupBox(
             "Результат"
@@ -212,9 +262,9 @@ class ChangeDetectorDialog(QDialog):
             output_group
         )
 
-        # -----------------------------------------------------
-        # Кнопка запуска
-        # -----------------------------------------------------
+        # =====================================================
+        # КНОПКА ЗАПУСКА
+        # =====================================================
 
         self.run_button = QPushButton(
             "Определить изменения"
@@ -228,9 +278,9 @@ class ChangeDetectorDialog(QDialog):
             self.run_button
         )
 
-        # -----------------------------------------------------
-        # Статус
-        # -----------------------------------------------------
+        # =====================================================
+        # СТАТУС
+        # =====================================================
 
         self.status_label = QLabel(
             "Выберите два растровых слоя."
@@ -248,22 +298,29 @@ class ChangeDetectorDialog(QDialog):
             main_layout
         )
 
-        # При смене первого растра
-        # обновляем список каналов
+        # =====================================================
+        # СИГНАЛЫ
+        # =====================================================
 
         self.before_combo.currentIndexChanged.connect(
             self.update_bands
         )
 
-    # ---------------------------------------------------------
+        self.use_qa_checkbox.stateChanged.connect(
+            self.update_qa_controls
+        )
+
+    # =========================================================
     # ЗАГРУЗКА РАСТРОВЫХ СЛОЁВ
-    # ---------------------------------------------------------
+    # =========================================================
 
     def load_raster_layers(self):
 
         self.before_combo.clear()
-
         self.after_combo.clear()
+
+        self.before_qa_combo.clear()
+        self.after_qa_combo.clear()
 
         layers = (
             self.iface
@@ -281,6 +338,10 @@ class ChangeDetectorDialog(QDialog):
             and layer.isValid()
         ]
 
+        # -----------------------------------------------------
+        # Основные растры
+        # -----------------------------------------------------
+
         for layer in raster_layers:
 
             self.before_combo.addItem(
@@ -293,11 +354,136 @@ class ChangeDetectorDialog(QDialog):
                 layer
             )
 
+        # -----------------------------------------------------
+        # QA-растры
+        # -----------------------------------------------------
+
+        for layer in raster_layers:
+
+            layer_name = (
+                layer.name()
+                .upper()
+            )
+
+            if (
+                "QA_PIXEL" in layer_name
+                or "QA_PIXEL" in layer.source().upper()
+            ):
+
+                self.before_qa_combo.addItem(
+                    layer.name(),
+                    layer
+                )
+
+                self.after_qa_combo.addItem(
+                    layer.name(),
+                    layer
+                )
+
+        # -----------------------------------------------------
+        # Пытаемся автоматически выбрать QA
+        # -----------------------------------------------------
+
+        self.auto_select_qa_layers()
+
         self.update_bands()
 
-    # ---------------------------------------------------------
-    # ОБНОВЛЕНИЕ СПИСКА КАНАЛОВ
-    # ---------------------------------------------------------
+        self.update_qa_controls()
+
+    # =========================================================
+    # АВТОМАТИЧЕСКИЙ ВЫБОР QA
+    # =========================================================
+
+    def auto_select_qa_layers(self):
+
+        qa_count = (
+            self.before_qa_combo.count()
+        )
+
+        if qa_count == 0:
+            return
+
+        before_name = (
+            self.before_combo
+            .currentText()
+            .lower()
+        )
+
+        after_name = (
+            self.after_combo
+            .currentText()
+            .lower()
+        )
+
+        # -----------------------------------------------------
+        # Ищем QA с похожим названием
+        # -----------------------------------------------------
+
+        for index in range(
+            qa_count
+        ):
+
+            qa_name = (
+                self.before_qa_combo
+                .itemText(index)
+                .lower()
+            )
+
+            if (
+                before_name
+                and before_name.split("_")[0]
+                in qa_name
+            ):
+
+                self.before_qa_combo.setCurrentIndex(
+                    index
+                )
+
+                break
+
+        for index in range(
+            self.after_qa_combo.count()
+        ):
+
+            qa_name = (
+                self.after_qa_combo
+                .itemText(index)
+                .lower()
+            )
+
+            if (
+                after_name
+                and after_name.split("_")[0]
+                in qa_name
+            ):
+
+                self.after_qa_combo.setCurrentIndex(
+                    index
+                )
+
+                break
+
+    # =========================================================
+    # УПРАВЛЕНИЕ QA
+    # =========================================================
+
+    def update_qa_controls(self):
+
+        enabled = (
+            self.use_qa_checkbox.isChecked()
+        )
+
+        self.before_qa_combo.setEnabled(
+            enabled
+        )
+
+        self.after_qa_combo.setEnabled(
+            enabled
+        )
+
+    # =========================================================
+    # ОБНОВЛЕНИЕ КАНАЛОВ
+    # =========================================================
 
     def update_bands(self):
 
@@ -349,9 +535,9 @@ class ChangeDetectorDialog(QDialog):
                 band_number
             )
 
-    # ---------------------------------------------------------
-    # ВЫБОР ФАЙЛА РЕЗУЛЬТАТА
-    # ---------------------------------------------------------
+    # =========================================================
+    # ВЫБОР ФАЙЛА
+    # =========================================================
 
     def select_output(self):
 
@@ -370,31 +556,14 @@ class ChangeDetectorDialog(QDialog):
                 path
             )
 
-    # ---------------------------------------------------------
-    # НАСТРОЙКА ОТОБРАЖЕНИЯ МАСКИ
-    # ---------------------------------------------------------
+    # =========================================================
+    # ОТОБРАЖЕНИЕ МАСКИ
+    # =========================================================
 
     def style_change_layer(
         self,
         layer
     ):
-        """
-        Настраивает отображение результата.
-
-        Значения растра:
-
-            0   - изменений нет
-            1   - обнаружено изменение
-            255 - NoData
-
-        Отображение:
-
-            0   - прозрачный
-            1   - красный
-            255 - прозрачный
-        """
-
-        # Создаём цветовую шкалу
 
         color_ramp = (
             QgsColorRampShader()
@@ -403,10 +572,6 @@ class ChangeDetectorDialog(QDialog):
         color_ramp.setColorRampType(
             QgsColorRampShader.Discrete
         )
-
-        # ---------------------------------------------
-        # Значение 0
-        # ---------------------------------------------
 
         no_change = (
             QgsColorRampShader.ColorRampItem(
@@ -420,10 +585,6 @@ class ChangeDetectorDialog(QDialog):
                 "Нет изменений"
             )
         )
-
-        # ---------------------------------------------
-        # Значение 1
-        # ---------------------------------------------
 
         change = (
             QgsColorRampShader.ColorRampItem(
@@ -445,10 +606,6 @@ class ChangeDetectorDialog(QDialog):
             ]
         )
 
-        # ---------------------------------------------
-        # Создаём shader
-        # ---------------------------------------------
-
         raster_shader = (
             QgsRasterShader()
         )
@@ -456,10 +613,6 @@ class ChangeDetectorDialog(QDialog):
         raster_shader.setRasterShaderFunction(
             color_ramp
         )
-
-        # ---------------------------------------------
-        # Создаём renderer
-        # ---------------------------------------------
 
         renderer = (
             QgsSingleBandPseudoColorRenderer(
@@ -473,13 +626,11 @@ class ChangeDetectorDialog(QDialog):
             renderer
         )
 
-        # NoData остаётся прозрачным
-
         layer.triggerRepaint()
 
-    # ---------------------------------------------------------
+    # =========================================================
     # ЗАПУСК АНАЛИЗА
-    # ---------------------------------------------------------
+    # =========================================================
 
     def run_detection(self):
 
@@ -498,6 +649,25 @@ class ChangeDetectorDialog(QDialog):
             .currentData()
         )
 
+        use_qa = (
+            self.use_qa_checkbox
+            .isChecked()
+        )
+
+        before_qa_layer = (
+            self.before_qa_combo
+            .currentData()
+            if use_qa
+            else None
+        )
+
+        after_qa_layer = (
+            self.after_qa_combo
+            .currentData()
+            if use_qa
+            else None
+        )
+
         sigma = (
             self.sigma_spin.value()
         )
@@ -513,7 +683,7 @@ class ChangeDetectorDialog(QDialog):
         )
 
         # -----------------------------------------------------
-        # Проверка выбора слоёв
+        # Проверка выбора
         # -----------------------------------------------------
 
         if before_layer is None:
@@ -557,7 +727,35 @@ class ChangeDetectorDialog(QDialog):
             return
 
         # -----------------------------------------------------
-        # Проверка совместимости растров
+        # Проверка QA
+        # -----------------------------------------------------
+
+        if use_qa:
+
+            if before_qa_layer is None:
+
+                QMessageBox.warning(
+                    self,
+                    "Ошибка QA",
+                    "Не выбран QA_PIXEL "
+                    "для снимка до."
+                )
+
+                return
+
+            if after_qa_layer is None:
+
+                QMessageBox.warning(
+                    self,
+                    "Ошибка QA",
+                    "Не выбран QA_PIXEL "
+                    "для снимка после."
+                )
+
+                return
+
+        # -----------------------------------------------------
+        # Проверка основных растров
         # -----------------------------------------------------
 
         is_valid, message = (
@@ -579,7 +777,7 @@ class ChangeDetectorDialog(QDialog):
             return
 
         # -----------------------------------------------------
-        # Запуск анализа
+        # Запуск
         # -----------------------------------------------------
 
         self.run_button.setEnabled(
@@ -588,15 +786,11 @@ class ChangeDetectorDialog(QDialog):
 
         self.status_label.setText(
             "Выполняется анализ...\n\n"
-            "Для больших растров операция "
-            "может занять некоторое время."
+            "Подготавливаются данные "
+            "и маска QA_PIXEL."
         )
 
         try:
-
-            # -------------------------------------------------
-            # Основной алгоритм
-            # -------------------------------------------------
 
             result = detect_changes(
                 before_layer,
@@ -604,11 +798,13 @@ class ChangeDetectorDialog(QDialog):
                 band,
                 sigma,
                 min_region_size,
-                output_path
+                output_path,
+                before_qa_layer,
+                after_qa_layer
             )
 
             # -------------------------------------------------
-            # Открываем созданный GeoTIFF
+            # Открываем результат
             # -------------------------------------------------
 
             output_layer = (
@@ -626,24 +822,16 @@ class ChangeDetectorDialog(QDialog):
                     "результат."
                 )
 
-            # -------------------------------------------------
-            # Настраиваем отображение
-            # -------------------------------------------------
-
             self.style_change_layer(
                 output_layer
             )
-
-            # -------------------------------------------------
-            # Добавляем результат в проект
-            # -------------------------------------------------
 
             QgsProject.instance().addMapLayer(
                 output_layer
             )
 
             # -------------------------------------------------
-            # Получаем статистику
+            # Статистика
             # -------------------------------------------------
 
             changed_before = (
@@ -664,6 +852,12 @@ class ChangeDetectorDialog(QDialog):
                 ]
             )
 
+            masked_pixels = (
+                result[
+                    "qa_masked_pixels"
+                ]
+            )
+
             if valid_pixels > 0:
 
                 change_percent = (
@@ -677,7 +871,7 @@ class ChangeDetectorDialog(QDialog):
                 change_percent = 0
 
             # -------------------------------------------------
-            # Показываем результат
+            # Результат
             # -------------------------------------------------
 
             self.status_label.setText(
@@ -690,6 +884,9 @@ class ChangeDetectorDialog(QDialog):
 
                 f"Валидных пикселей: "
                 f"{valid_pixels:,}\n"
+
+                f"Замаскировано QA_PIXEL: "
+                f"{masked_pixels:,}\n\n"
 
                 f"Среднее значение разности: "
                 f"{result['mean']:.2f}\n"
@@ -717,8 +914,9 @@ class ChangeDetectorDialog(QDialog):
                 self,
                 "Анализ завершён",
                 "Маска изменений успешно создана.\n\n"
-                "Обнаруженные изменения "
-                "отображаются красным цветом."
+                "Облака, облачные тени, cirrus "
+                "и снег исключены из анализа "
+                "по QA_PIXEL."
             )
 
         except Exception as error:
@@ -739,7 +937,3 @@ class ChangeDetectorDialog(QDialog):
             self.run_button.setEnabled(
                 True
             )
-
-
-     
-
