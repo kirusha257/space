@@ -1,0 +1,10 @@
+[general]
+name=Raster Change Detector
+description=Детектор резких изменений растров на основе попиксельного сравнения
+about=Инструмент для обнаружения изменений между двумя растровыми снимками территории.
+version=1.0.0
+author=Kira
+email=
+category=Raster
+icon=
+qgisMinimumVersion=3.28
